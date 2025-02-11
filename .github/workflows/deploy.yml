@@ -8,65 +8,37 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v4
+      - name: Set Up Python
+        uses: actions/setup-python@v4
         with:
           python-version: 3.11
 
-      - name: Deploy to Local Machine via ngrok (SSH)
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          port: ${{ secrets.SERVER_PORT }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          script: |
-            echo "Deployment starting..."
-
-            # Navigate to project directory
-            cd fastapi-book-project || exit 1
-            git fetch --all || exit 1
-            git pull origin main || exit 1
-
-            # Create virtual environment if it doesn't exist
-            if [ ! -d "venv" ]; then
-              python3 -m venv venv || exit 1
-            fi
-
-            # Activate virtual environment and install dependencies
-            source venv/bin/activate || exit 1
-            python -m pip install --upgrade pip || exit 1
-            pip install --upgrade -r requirements.txt || exit 1
-
-            # Stop existing application if running
-            if pgrep -x "uvicorn" > /dev/null; then
-              echo "Stopping existing application..."
-              killall uvicorn || exit 1
-              echo "Application stopped successfully"
-            else
-              echo "No existing application running"
-            fi
-
-            # Start the application
-            echo "Starting application..."
-            nohup uvicorn main:app --host 0.0.0.0 --port 8000 > app.log 2>&1 &
-            echo "Application started successfully"
-
-            # Tail logs
-            tail -f app.log
-
-      - name: Expose FastAPI app via ngrok (HTTP)
+      - name: Install Dependencies
         run: |
-          # Expose FastAPI app to the internet using ngrok (HTTP)
-          ngrok http 8000 > /dev/null &  # Running in the background
-          sleep 5  # Wait for ngrok to set up
+          python -m venv venv
+          source venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-          # Get the public ngrok URL for the FastAPI app
+      - name: Start FastAPI Application
+        run: |
+          source venv/bin/activate
+          nohup uvicorn main:app --host 0.0.0.0 --port 8000 > app.log 2>&1 &
+
+      - name: Install Ngrok
+        run: |
+          curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+          echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | tee /etc/apt/sources.list.d/ngrok.list
+          apt update && apt install ngrok
+
+      - name: Start Ngrok Tunnel
+        run: |
+          ngrok authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
+          nohup ngrok http 8000 > ngrok.log 2>&1 &
+          sleep 5
           NGROK_URL=$(curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url')
-          echo "FastAPI App is available at $NGROK_URL"
-
-          # Display the public URL
-          echo "FASTAPI_PUBLIC_URL=$NGROK_URL" >> $GITHUB_ENV
+          echo "Application is live at: $NGROK_URL"
