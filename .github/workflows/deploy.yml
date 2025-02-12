@@ -1,4 +1,4 @@
-name: CD Pipeline
+name: deploy
 
 on:
   push:
@@ -17,46 +17,27 @@ jobs:
       - name: Deploy to Server
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          username: ${{ secrets.SERVER_USERNAME }}
+          host: ${{secrets.SERVER_HOST}}
+          key: ${{secrets.SERVER_SSH_KEY}}
+          username: ${{secrets.SERVER_USERNAME}}
           script: |
-            echo "Deployment starting..."
+            echo "deployment starting..."
 
-            # Navigate to project directory or clone if doesn't exist
-            if [ ! -d "fastapi-book-project" ]; then
-              git clone https://github.com/davidumoru/fastapi-book-project.git || { echo 'Git clone failed'; exit 1; }
-            fi
+            # Navigate to project directory
             cd fastapi-book-project
-            git reset --hard origin/main || { echo 'Git reset failed'; exit 1; }
-            git pull origin main || { echo 'Git pull failed'; exit 1; }
+            git fetch --all
+            git pull origin main
+            python3 -m venv venv || exit 1
+            source venv/bin/activate || exit 1
+            python -m pip install --upgrade pip || exit 1
+            pip install -r requirements.txt || exit 1
 
-            # Create virtual environment if it doesn't exist
-            if [ ! -d "venv" ]; then
-              python3 -m venv venv || { echo 'Virtual environment creation failed'; exit 1; }
-            fi
+            # Stop existing application if running
+            echo "Stopping existing application..."
+            killall uvicorn || echo "No existing process found"
+            echo "Application stopped successfully"
 
-            # Activate virtual environment and install dependencies
-            source venv/bin/activate || { echo 'Virtual environment activation failed'; exit 1; }
-            python -m pip install --upgrade pip || { echo 'Pip upgrade failed'; exit 1; }
-            pip install --upgrade -r requirements.txt || { echo 'Dependency installation failed'; exit 1; }
-
-            # Check if port 8000 is in use, and stop any existing application
-            if lsof -i :8000; then
-                echo "Port 8000 is in use, stopping existing application..."
-                killall uvicorn || { echo 'Failed to stop existing application'; exit 1; }
-            else
-                echo "No existing application running on port 8000"
-            fi
-
-            # Start the application
-            echo "Starting the application..."
+            # Start application
+            echo "Starting application..."
             nohup uvicorn main:app --host 0.0.0.0 --port 8000 > app.log 2>&1 &
-            if [ $? -eq 0 ]; then
-                echo "Application started successfully"
-            else
-                echo "Failed to start application"; exit 1;
-            fi
-
-            # Tail logs for monitoring
-            tail -f app.log || { echo 'Failed to tail logs'; exit 1; }
+            echo "Application started successfully"
